@@ -107,9 +107,7 @@ def _parse_uid_list(response_lines) -> List[int]:
             try:
                 uids.append(int(part))
             except ValueError:
-                    uids.append(int(part))
-                except ValueError:
-                    pass
+                pass
     return uids
 
 
