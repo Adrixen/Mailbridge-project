@@ -207,7 +207,7 @@ class AppendBackend(GmailDelivery):
 
         try:
             # Select the mailbox first
-            conn.select(f'"{self._config.append_mailbox}"', readonly=True)
+            conn.select(self._config.append_mailbox, readonly=True)
             criteria = f'HEADER Message-ID "{message_id}"'
             typ, data = conn.uid("SEARCH", "UTF-8", criteria)
             if typ != "OK":
@@ -240,7 +240,7 @@ class AppendBackend(GmailDelivery):
         """
         conn = self._ensure_connected()
         try:
-            conn.select('"INBOX"', readonly=False)
+            conn.select("INBOX", readonly=False)
             criteria = f'HEADER Message-ID "{message_id}"'
             typ, data = conn.uid("SEARCH", "UTF-8", criteria)
             if typ != "OK":
@@ -252,7 +252,8 @@ class AppendBackend(GmailDelivery):
                 )
                 return
             uid = uids[0]
-            typ, data = conn.uid("COPY", str(uid), f'"{label}"')
+            # Let imaplib handle quoting — don't add extra quotes
+            typ, data = conn.uid("COPY", str(uid), label)
             if typ != "OK":
                 raise RuntimeError(f"UID COPY to {label} failed: {typ!r}")
         except (imaplib.IMAP4.abort, OSError, imaplib.IMAP4.error) as exc:
