@@ -184,6 +184,10 @@ def main() -> int:
     cumulative = get_cumulative_stats(shared_state)
     status_registry = StatusRegistry(cumulative_stats=cumulative)
 
+    # Pre-register accounts in config order so the web panel preserves order
+    for acc in config.accounts:
+        status_registry.update(acc.id, "idle")
+
     # Handle --once differently: run one cycle, save state, exit
     if args.once:
         log.info("MailBridge starting (--once mode)")

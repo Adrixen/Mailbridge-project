@@ -433,6 +433,15 @@ class StatusRegistry:
                 entry["total_errors"] = entry.get("total_errors", 0) + stats.get(
                     "errors", 0
                 )
+                entry["last_run"] = {
+                    "copied": stats.get("copied", 0),
+                    "errors": stats.get("errors", 0),
+                }
+                # Keep last 5 runs
+                history = entry.setdefault("run_history", [])
+                history.append(entry["last_run"])
+                if len(history) > 5:
+                    history.pop(0)
 
     def snapshot(self) -> Dict[str, Any]:
         """Return a copy of the current status for all accounts."""

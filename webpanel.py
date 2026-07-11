@@ -35,47 +35,92 @@ _PAGE_TEMPLATE = """<!DOCTYPE html>
           --green: #4ade80; --red: #f87171; --yellow: #fbbf24; --blue: #60a5fa; }}
   * {{ margin: 0; padding: 0; box-sizing: border-box; }}
   body {{ font-family: system-ui, -apple-system, sans-serif; background: var(--bg);
-         color: var(--text); min-height: 100vh; padding: 2rem; }}
-  h1 {{ font-size: 1.75rem; margin-bottom: 0.5rem; }}
-  .subtitle {{ color: var(--muted); margin-bottom: 2rem; font-size: 0.9rem; }}
-  .grid {{ display: grid; grid-template-columns: repeat(auto-fill, minmax(320px, 1fr));
-          gap: 1.25rem; }}
-  .card {{ background: var(--card); border-radius: 12px; padding: 1.25rem;
+         color: var(--text); min-height: 100vh; padding: 1.5rem; }}
+  h1 {{ font-size: 1.5rem; margin-bottom: 0.25rem; }}
+  .subtitle {{ color: var(--muted); margin-bottom: 1rem; font-size: 0.85rem; }}
+  .toolbar {{ display: flex; gap: 0.75rem; align-items: center; margin-bottom: 1.25rem; flex-wrap: wrap; }}
+  .grid {{ display: grid; grid-template-columns: repeat(auto-fill, minmax(340px, 1fr)); gap: 1rem; }}
+  .card {{ background: var(--card); border-radius: 10px; padding: 1rem;
           border: 1px solid #334155; }}
-  .card h3 {{ font-size: 1.1rem; margin-bottom: 0.75rem; color: var(--blue); }}
-  .row {{ display: flex; justify-content: space-between; padding: 0.35rem 0;
-          border-bottom: 1px solid #1e293b; font-size: 0.875rem; }}
+  .card h3 {{ font-size: 1rem; margin-bottom: 0.5rem; color: var(--blue); }}
+  .row {{ display: flex; justify-content: space-between; padding: 0.3rem 0;
+          border-bottom: 1px solid #1e293b; font-size: 0.8rem; }}
   .row:last-child {{ border-bottom: none; }}
   .label {{ color: var(--muted); }}
-  .status {{ font-weight: 600; text-transform: uppercase; font-size: 0.8rem;
+  .status {{ font-weight: 600; text-transform: uppercase; font-size: 0.75rem;
             padding: 2px 8px; border-radius: 4px; }}
   .status.syncing {{ background: #1e3a5f; color: var(--blue); }}
   .status.idle {{ background: #14532d; color: var(--green); }}
   .status.error {{ background: #450a0a; color: var(--red); }}
   .status.unknown {{ background: #334155; color: var(--muted); }}
-  .btn {{ background: var(--blue); color: #0f172a; border: none; padding: 0.6rem 1.5rem;
-         border-radius: 8px; font-weight: 600; cursor: pointer; font-size: 0.9rem; }}
-  .btn:hover {{ opacity: 0.9; }}
-  .error-msg {{ color: var(--red); font-size: 0.8rem; margin-top: 0.25rem; }}
-  .refresh {{ text-align: center; margin: 1.5rem 0; }}
-  .no-accounts {{ text-align: center; color: var(--muted); padding: 3rem; }}
+  .btn {{ background: var(--blue); color: #0f172a; border: none; padding: 0.4rem 1rem;
+         border-radius: 6px; font-weight: 600; cursor: pointer; font-size: 0.8rem; }}
+  .btn:hover {{ opacity: 0.85; }}
+  .btn.danger {{ background: var(--red); }}
+  .error-msg {{ color: var(--red); font-size: 0.75rem; margin-top: 0.2rem; }}
+  .history {{ display: flex; gap: 0.35rem; flex-wrap: wrap; margin-top: 0.25rem; }}
+  .history-dot {{ padding: 1px 6px; border-radius: 3px; font-size: 0.7rem; }}
+  .history-dot.ok {{ background: #14532d; color: var(--green); }}
+  .history-dot.err {{ background: #450a0a; color: var(--red); }}
+  .no-accounts {{ text-align: center; color: var(--muted); padding: 2rem; }}
+
+  /* Logs section */
+  .log-section {{ margin-top: 1.5rem; }}
+  .log-section h2 {{ font-size: 1.1rem; margin-bottom: 0.5rem; }}
+  #log-box {{ background: #0a0f1a; border: 1px solid #334155; border-radius: 8px;
+             padding: 0.75rem; font-family: 'Courier New', monospace; font-size: 0.75rem;
+             max-height: 300px; overflow-y: auto; color: var(--muted); line-height: 1.5; }}
+  .log-line {{ white-space: pre-wrap; word-break: break-all; }}
+  .auto-refresh {{ display: flex; align-items: center; gap: 0.5rem; font-size: 0.8rem; color: var(--muted); }}
 </style>
 </head>
 <body>
 <h1>📬 MailBridge</h1>
 <p class="subtitle">WP.pl → Gmail sync dashboard — {now}</p>
 
-<div class="refresh">
-  <button class="btn" onclick="location.reload()">🔄 Refresh</button>
+<div class="toolbar">
+  <button class="btn" onclick="location.reload()">🔄 Refresh page</button>
+  <label class="auto-refresh"><input type="checkbox" id="autoRefresh" checked onchange="toggleAutoRefresh()"> Auto-refresh (5s)</label>
 </div>
 
 <div class="grid">
 {cards}
 </div>
 
-<p class="subtitle" style="margin-top:2rem;">
-  Page auto-generated at {now} · Refresh for latest status
-</p>
+<div class="log-section">
+  <h2>📋 Live logs</h2>
+  <div id="log-box"><div class="log-line">Waiting for logs...</div></div>
+</div>
+
+<p class="subtitle" style="margin-top:1rem;">Page generated at {now}</p>
+
+<script>
+let refreshTimer = null;
+function toggleAutoRefresh() {{
+  if (document.getElementById('autoRefresh').checked) {{
+    startAutoRefresh();
+  }} else {{
+    stopAutoRefresh();
+  }}
+}}
+function startAutoRefresh() {{
+  stopAutoRefresh();
+  refreshTimer = setInterval(() => {{ fetchLogs(); }}, 5000);
+}}
+function stopAutoRefresh() {{
+  if (refreshTimer) {{ clearInterval(refreshTimer); refreshTimer = null; }}
+}}
+async function fetchLogs() {{
+  try {{
+    const res = await fetch('/api/logs?lines=50');
+    const text = await res.text();
+    const box = document.getElementById('log-box');
+    box.innerHTML = text.split('\\n').filter(l => l.trim()).map(l => `<div class="log-line">${{l}}</div>`).join('');
+    box.scrollTop = box.scrollHeight;
+  }} catch(e) {{}}
+}}
+startAutoRefresh();
+</script>
 </body>
 </html>"""
 
@@ -83,8 +128,9 @@ _CARD_TEMPLATE = """<div class="card">
   <h3>{email}</h3>
   <div class="row"><span class="label">Status</span><span class="status {status_cls}">{status}</span></div>
   <div class="row"><span class="label">Last sync</span><span>{last_sync}</span></div>
-  <div class="row"><span class="label">Total copied</span><span>{total_copied}</span></div>
-  <div class="row"><span class="label">Total errors</span><span>{total_errors}</span></div>
+  <div class="row"><span class="label">Last run</span><span>{last_run}</span></div>
+  <div class="row"><span class="label">Total (all time)</span><span>{total_copied} copied, {total_errors} errors</span></div>
+  <div class="row"><span class="label">Last 5 runs</span><span class="history">{history_dots}</span></div>
   {error_row}
 </div>"""
 
@@ -98,7 +144,7 @@ class StatusHandler(BaseHTTPRequestHandler):
     """HTTP handler that renders the status page."""
 
     # Class-level reference set by the server factory
-    status_registry: StatusRegistry = None
+    status_registry: "StatusRegistry" = None  # type: ignore[assignment]
 
     def log_message(self, format, *args):
         log.debug("HTTP %s", format % args)
@@ -108,6 +154,8 @@ class StatusHandler(BaseHTTPRequestHandler):
             self._serve_page()
         elif self.path == "/api/status":
             self._serve_json()
+        elif self.path.startswith("/api/logs"):
+            self._serve_logs()
         else:
             self.send_response(404)
             self.end_headers()
@@ -121,7 +169,7 @@ class StatusHandler(BaseHTTPRequestHandler):
         if not snapshot:
             cards = '<div class="no-accounts">No accounts configured yet.</div>'
         else:
-            for acc_id, info in sorted(snapshot.items()):
+            for acc_id, info in snapshot.items():
                 status = info.get("status", "unknown")
                 last_sync = info.get("last_sync") or 0
                 last_sync_str = (
@@ -135,13 +183,36 @@ class StatusHandler(BaseHTTPRequestHandler):
                     if error
                     else ""
                 )
+
+                # Last run stats
+                last_run = info.get("last_run", {})
+                if last_run:
+                    last_run_str = f'{last_run.get("copied", 0)} copied, {last_run.get("errors", 0)} errors'
+                else:
+                    last_run_str = "—"
+
+                # History dots (last 5 runs)
+                history = info.get("run_history", [])
+                history_dots = ""
+                for h in history:
+                    if h.get("errors", 0) > 0:
+                        history_dots += '<span class="history-dot err" title="' + str(h.get("copied", 0)) + ' copied, ' + str(h.get("errors", 0)) + ' errors">✗</span>'
+                    elif h.get("copied", 0) > 0:
+                        history_dots += '<span class="history-dot ok" title="' + str(h.get("copied", 0)) + ' copied">✓</span>'
+                    else:
+                        history_dots += '<span class="history-dot" style="background:#1e293b;color:#475569" title="0 copied, 0 errors">−</span>'
+                if not history_dots:
+                    history_dots = '<span style="color:var(--muted);font-size:0.75rem;">—</span>'
+
                 cards += _CARD_TEMPLATE.format(
                     email=acc_id,
                     status=status,
                     status_cls=status,
                     last_sync=last_sync_str,
+                    last_run=last_run_str,
                     total_copied=info.get("total_copied", 0),
                     total_errors=info.get("total_errors", 0),
+                    history_dots=history_dots,
                     error_row=error_row,
                 )
 
@@ -157,6 +228,30 @@ class StatusHandler(BaseHTTPRequestHandler):
         self.send_response(200)
         self.send_header("Content-Type", "application/json")
         self.send_header("Content-Length", str(len(body)))
+        self.send_header("Access-Control-Allow-Origin", "*")
+        self.end_headers()
+        self.wfile.write(body)
+
+    def _serve_logs(self):
+        """Return the last N lines of the mailbridge log file."""
+        import mimetypes
+        from urllib.parse import urlparse, parse_qs
+
+        qs = parse_qs(urlparse(self.path).query)
+        lines_count = int(qs.get("lines", [50])[0])
+        log_path = os.path.join(os.path.dirname(__file__), "logs", "mailbridge.log")
+        try:
+            with open(log_path, "r", encoding="utf-8", errors="replace") as fh:
+                all_lines = fh.readlines()
+            tail = "".join(all_lines[-lines_count:])
+        except (FileNotFoundError, OSError):
+            tail = "Log file not found."
+
+        body = tail.encode("utf-8")
+        self.send_response(200)
+        self.send_header("Content-Type", "text/plain; charset=utf-8")
+        self.send_header("Content-Length", str(len(body)))
+        self.send_header("Access-Control-Allow-Origin", "*")
         self.end_headers()
         self.wfile.write(body)
 
