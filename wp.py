@@ -412,11 +412,8 @@ class WPMailbox:
             raise WPConnectionError("Not connected")
         try:
             capabilities = self._conn.capability()
-            cap_str = (
-                capabilities[0].decode("utf-8", errors="replace")
-                if capabilities and capabilities[0]
-                else ""
-            )
+            raw = capabilities[0] if capabilities and capabilities[0] else ""
+            cap_str = raw.decode("utf-8", errors="replace") if isinstance(raw, bytes) else str(raw)
             if "MOVE" in cap_str:
                 self._uid_move(uid, trash_mailbox)
             else:
