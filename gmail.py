@@ -208,7 +208,9 @@ class AppendBackend(GmailDelivery):
             for line in data:
                 if isinstance(line, bytes):
                     line = line.decode("utf-8", errors="replace")
-                if line.startswith("* SEARCH") and len(line.split()) > 2:
+                # imaplib strips * SEARCH prefix - just check if there's content
+                clean = line.replace("* SEARCH", "").strip()
+                if clean and any(c.isdigit() for c in clean):
                     return True
             return False
         except imaplib.IMAP4.error:

@@ -87,17 +87,26 @@ def _parse_uidnext(conn: imaplib.IMAP4_SSL) -> Optional[int]:
 def _parse_uid_list(response_lines) -> List[int]:
     """
     Parse SEARCH response into a list of integer UIDs.
-    IMAP SEARCH returns space-separated UIDs in one or more lines.
+
+    imaplib strips the ``* SEARCH`` prefix, so lines contain only the
+    space-separated UIDs (e.g. ``b'1 2 3 4 5'``).  Also handles raw
+    ``* SEARCH ...`` format as a fallback.
     """
     uids: List[int] = []
     for line in response_lines:
         if isinstance(line, bytes):
             line = line.decode("utf-8", errors="replace")
-        # Only process lines that look like search results (not status)
+        # imaplib strips * SEARCH - just parse numbers
+        # If the line still has * SEARCH prefix, skip past it
         if line.startswith("* SEARCH"):
             parts = line.split()
-            for part in parts[2:]:
-                try:
+            numbers = parts[2:]
+        else:
+            numbers = line.split()
+        for part in numbers:
+            try:
+                uids.append(int(part))
+            except ValueError:
                     uids.append(int(part))
                 except ValueError:
                     pass
