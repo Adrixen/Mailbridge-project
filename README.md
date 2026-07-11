@@ -91,7 +91,7 @@ sudo -u mailbridge /opt/mailbridge/venv/bin/python /opt/mailbridge/bridge.py --o
 
 Check the log output for "Available WP folders" and confirm that
 `wp.trash_mailbox` in `config/config.yaml` matches the actual trash folder name
-(likely `"Kosz"` for Polish WP.pl).
+(likely `"Trash"` for Polish WP.pl).
 
 ### 8. Test with dry run
 
@@ -143,7 +143,7 @@ sudo systemctl restart mailbridge
 | `max_message_bytes` | `52428800` | 50 MB max message size |
 | `initial_import` | `false` | Import all existing mail on first run |
 | `gmail.method` | `append` | `append` (App Password) or `api` (OAuth) |
-| `wp.trash_mailbox` | `Kosz` | WP trash folder name |
+| `wp.trash_mailbox` | `Trash` | WP trash folder name |
 | `wp.mark_seen_after_copy` | `false` | Mark messages \\Seen after copy |
 | `wp.extra_folders` | `[]` | Additional folders to sync (e.g. `["Sent"]`) |
 
@@ -153,8 +153,8 @@ sudo systemctl restart mailbridge
 gmail:
   app_password: "xxxx xxxx xxxx xxxx"
 accounts:
-  konto1: "password1"
-  konto2: "password2"
+  account1: "password1"
+  account2: "password2"
 ```
 
 ---

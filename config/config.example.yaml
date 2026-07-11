@@ -35,9 +35,9 @@ wp:
 # initial_import: false
 
 accounts:
-  - id: konto1
-    email: konto1@wp.pl
-    append_mailbox: "WP.PL/konto1@wp.pl"   # optional: defaults to "WP.PL/<email>" if omitted
-  - id: konto2
-    email: konto2@wp.pl
-    # append_mailbox not set → defaults to "WP.PL/konto2@wp.pl"
+  - id: account1
+    email: account1@wp.pl
+    append_mailbox: "WP.PL/account1@wp.pl"   # optional: defaults to "WP.PL/<email>" if omitted
+  - id: account2
+    email: account2@wp.pl
+    # append_mailbox not set → defaults to "WP.PL/account2@wp.pl"

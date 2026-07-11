@@ -324,7 +324,7 @@ class AccountWorker:
 
         Rules:
           - "Spam" → ``[Gmail]/Spam`` (Gmail's built-in spam folder)
-          - All other folders → ``self._account.append_mailbox`` (e.g. "WP.PL/konto1@wp.pl")
+          - All other folders → ``self._account.append_mailbox`` (e.g. "WP.PL/account1@wp.pl")
         """
         if folder.upper() == "SPAM":
             return "[Gmail]/Spam"

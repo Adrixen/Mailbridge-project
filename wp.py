@@ -119,7 +119,7 @@ class WPMailbox:
             uidv, uidnext = mb.select("INBOX")
             new_uids = mb.search_new_uids(last_uid)
             raw = mb.fetch_rfc822(new_uids[0])
-            mb.move_to_trash(new_uids[0], "Kosz")
+            mb.move_to_trash(new_uids[0], "Trash")
     """
 
     def __init__(

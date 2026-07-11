@@ -170,7 +170,7 @@ def _parse_accounts(
         email = entry["email"]
         password = pwd_accounts.get(acc_id, "")
         folders = [wp_config.source_mailbox] + wp_config.extra_folders
-        # Default subfolder: "WP.PL/<email>" e.g. "WP.PL/konto1@wp.pl"
+        # Default subfolder: "WP.PL/<email>" e.g. "WP.PL/account1@wp.pl"
         am = entry.get("append_mailbox", "")
         if not am:
             am = f"WP.PL/{email}"
