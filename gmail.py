@@ -23,6 +23,21 @@ from typing import Optional
 from config import GmailConfig, RetryConfig
 
 
+def _parse_uid_list(response_lines) -> list[int]:
+    """Parse IMAP SEARCH response into a list of integer UIDs."""
+    uids: list[int] = []
+    for line in response_lines:
+        if isinstance(line, bytes):
+            line = line.decode("utf-8", errors="replace")
+        clean = line.replace("* SEARCH", "").strip()
+        for part in clean.split():
+            try:
+                uids.append(int(part))
+            except ValueError:
+                pass
+    return uids
+
+
 @dataclass
 class DeliveryResult:
     ok: bool
@@ -66,6 +81,10 @@ class GmailDelivery(ABC):
     @abstractmethod
     def close(self) -> None:
         """Release any resources (connections, sessions)."""
+
+    @abstractmethod
+    def add_label(self, message_id: str, label: str) -> None:
+        """Apply a Gmail label to an already-delivered message by Message-ID."""
 
 
 # ---------------------------------------------------------------------------
@@ -212,6 +231,33 @@ class AppendBackend(GmailDelivery):
                 pass
             self._conn = None
 
+    def add_label(self, message_id: str, label: str) -> None:
+        """
+        Apply a Gmail label to an already-delivered message.
+
+        Searches INBOX for the message by Message-ID, then copies it to
+        the target label folder (which adds the label in Gmail).
+        """
+        conn = self._ensure_connected()
+        try:
+            conn.select('"INBOX"', readonly=False)
+            criteria = f'HEADER Message-ID "{message_id}"'
+            typ, data = conn.uid("SEARCH", "UTF-8", criteria)
+            if typ != "OK":
+                raise RuntimeError(f"SEARCH failed: {typ!r}")
+            uids = _parse_uid_list(data)
+            if not uids:
+                self._log.warning(
+                    "add_label: message %s not found in INBOX", message_id
+                )
+                return
+            uid = uids[0]
+            typ, data = conn.uid("COPY", str(uid), f'"{label}"')
+            if typ != "OK":
+                raise RuntimeError(f"UID COPY to {label} failed: {typ!r}")
+        except (imaplib.IMAP4.abort, OSError, imaplib.IMAP4.error) as exc:
+            raise RuntimeError(f"add_label failed: {exc}") from exc
+
 
 # ---------------------------------------------------------------------------
 # Gmail API backend (optional)
@@ -328,6 +374,10 @@ class ApiBackend(GmailDelivery):
 
     def close(self) -> None:
         self._service = None
+
+    def add_label(self, message_id: str, label: str) -> None:
+        """Apply a Gmail label (not implemented for API backend)."""
+        pass  # API import handles labels natively
 
 
 # ---------------------------------------------------------------------------

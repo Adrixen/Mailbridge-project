@@ -272,15 +272,18 @@ class AccountWorker:
                 state_mod.set_last_uid(self._state, self._account.id, folder, uid)
                 return
 
-        # Step 2: Deliver to Gmail
+        # Step 2: Deliver to Gmail INBOX, then optionally label
+        label = gmail_target if gmail_target.upper() != "INBOX" else None
+
         if self._app.dry_run:
+            inbox_target = "INBOX"
             self._log.info(
-                "[DRY-RUN] uid=%d: would deliver to Gmail mailbox '%s' (msgid=%s)",
-                uid, gmail_target, msg_id
+                "[DRY-RUN] uid=%d: would deliver to %s and label as '%s' (msgid=%s)",
+                uid, inbox_target, label or "(none)", msg_id
             )
             result = DeliveryResult(ok=True, message_id=msg_id)
         else:
-            result = self._gmail.deliver(raw, mailbox=gmail_target)
+            result = self._gmail.deliver(raw, mailbox="INBOX")
 
         if not result.ok:
             self._log.error(
@@ -289,7 +292,17 @@ class AccountWorker:
             self._stats["errors"] += 1
             return  # Do NOT advance last_uid — retry next cycle
 
-        self._log.info("uid=%d delivered to Gmail (msgid=%s)", uid, msg_id)
+        self._log.info("uid=%d delivered to INBOX (msgid=%s)", uid, msg_id)
+
+        # Apply label if target is not INBOX and we have a Message-ID
+        if label and msg_id and not self._app.dry_run:
+            try:
+                self._gmail.add_label(msg_id, label)
+                self._log.info("uid=%d labeled as '%s'", uid, label)
+            except Exception as exc:
+                self._log.warning(
+                    "uid=%d: failed to label as '%s': %s", uid, label, exc
+                )
 
         # Step 3: Delivery verified — move to Trash (skip for Spam folder)
         if folder.upper() == "SPAM":
