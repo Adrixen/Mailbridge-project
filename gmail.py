@@ -209,7 +209,7 @@ class AppendBackend(GmailDelivery):
             # Select the mailbox first
             conn.select(self._config.append_mailbox, readonly=True)
             criteria = f'HEADER Message-ID "{message_id}"'
-            typ, data = conn.uid("SEARCH", "UTF-8", criteria)
+            typ, data = conn.uid("SEARCH", None, criteria)
             if typ != "OK":
                 return False
             for line in data:
@@ -242,7 +242,7 @@ class AppendBackend(GmailDelivery):
         try:
             conn.select("INBOX", readonly=False)
             criteria = f'HEADER Message-ID "{message_id}"'
-            typ, data = conn.uid("SEARCH", "UTF-8", criteria)
+            typ, data = conn.uid("SEARCH", None, criteria)
             if typ != "OK":
                 raise RuntimeError(f"SEARCH failed: {typ!r}")
             uids = _parse_uid_list(data)
