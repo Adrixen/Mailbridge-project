@@ -159,26 +159,14 @@ class AppendBackend(GmailDelivery):
         target = mailbox or self._config.append_mailbox
 
         # Build IMAP APPEND arguments
-        append_args = [target]
-
-        # Flags
-        if flags:
-            flag_str = " ".join(flags)
-            if not flag_str.startswith("("):
-                flag_str = f"({flag_str})"
-        else:
-            flag_str = "()"
-        append_args.append(flag_str)
-
-        # Internal date
-        if internaldate:
-            append_args.append(f'"{internaldate}"')
-
-        # Message data
-        append_args.append(raw_rfc822)
+        # signature: append(mailbox, flags, date_time, message)
+        flag_str = " ".join(flags) if flags else ""
+        if not flag_str.startswith("("):
+            flag_str = f"({flag_str})" if flags else "()"
 
         try:
-            typ, data = conn.append(*append_args)
+            # imaplib's append() accepts None for date_time (uses current time)
+            typ, data = conn.append(target, flag_str, internaldate, raw_rfc822)  # type: ignore[arg-type]
             if typ == "OK":
                 # Try to extract Message-ID from raw for logging
                 msg_id = _extract_message_id(raw_rfc822)
@@ -202,7 +190,7 @@ class AppendBackend(GmailDelivery):
             # Select the mailbox first
             conn.select(f'"{self._config.append_mailbox}"', readonly=True)
             criteria = f'HEADER Message-ID "{message_id}"'
-            typ, data = conn.uid("SEARCH", None, criteria)
+            typ, data = conn.uid("SEARCH", "UTF-8", criteria)
             if typ != "OK":
                 return False
             for line in data:
@@ -248,10 +236,10 @@ class ApiBackend(GmailDelivery):
             return self._service
 
         try:
-            from google.auth.transport.requests import Request
-            from google.oauth2.credentials import Credentials
-            from google_auth_oauthlib.flow import InstalledAppFlow
-            from googleapiclient.discovery import build
+            from google.auth.transport.requests import Request  # type: ignore[import-untyped]
+            from google.oauth2.credentials import Credentials  # type: ignore[import-untyped]
+            from google_auth_oauthlib.flow import InstalledAppFlow  # type: ignore[import-untyped]
+            from googleapiclient.discovery import build  # type: ignore[import-untyped]
         except ImportError as exc:
             raise ImportError(
                 "google-api-python-client and google-auth-* are required "
