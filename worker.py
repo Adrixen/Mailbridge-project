@@ -291,8 +291,10 @@ class AccountWorker:
 
         self._log.info("uid=%d delivered to Gmail (msgid=%s)", uid, msg_id)
 
-        # Step 3: Delivery verified — move to Trash
-        if self._app.dry_run:
+        # Step 3: Delivery verified — move to Trash (skip for Spam folder)
+        if folder.upper() == "SPAM":
+            self._log.info("uid=%d left in WP Spam folder (as configured)", uid)
+        elif self._app.dry_run:
             self._log.info(
                 "[DRY-RUN] uid=%d: would move to WP Trash '%s'",
                 uid,
