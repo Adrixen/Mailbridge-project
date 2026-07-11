@@ -1,0 +1,375 @@
+"""
+MailBridge — Gmail delivery backends.
+
+Provides a common ``GmailDelivery`` interface with two implementations:
+
+* ``AppendBackend`` — delivers via IMAP ``APPEND`` using a Gmail App Password.
+* ``ApiBackend`` — delivers via Gmail API ``users.messages.import`` (OAuth).
+
+The factory ``build_gmail_delivery`` selects the backend based on config.
+"""
+
+from __future__ import annotations
+
+import email
+import imaplib
+import logging
+import ssl
+import time
+from abc import ABC, abstractmethod
+from dataclasses import dataclass
+from typing import Optional
+
+from config import GmailConfig, RetryConfig
+
+
+@dataclass
+class DeliveryResult:
+    ok: bool
+    message_id: Optional[str] = None
+    error: Optional[str] = None
+
+
+# ---------------------------------------------------------------------------
+# Abstract interface
+# ---------------------------------------------------------------------------
+
+
+class GmailDelivery(ABC):
+    """Interface for delivering a raw RFC822 message into Gmail."""
+
+    @abstractmethod
+    def deliver(
+        self,
+        raw_rfc822: bytes,
+        internaldate: Optional[str] = None,
+        flags: Optional[tuple] = None,
+        mailbox: Optional[str] = None,
+    ) -> DeliveryResult:
+        """
+        Deliver a message to Gmail.
+
+        :param raw_rfc822: the complete RFC 822 message as bytes
+        :param internaldate: optional IMAP INTERNALDATE string
+        :param flags: optional IMAP flags tuple, e.g. ('\\Seen',)
+        :param mailbox: optional target mailbox override (e.g. per-account label)
+        :return: DeliveryResult with success status
+        """
+
+    @abstractmethod
+    def message_exists(self, message_id: str) -> bool:
+        """
+        Check whether a message with the given Message-ID already exists
+        in the target Gmail mailbox. Used for idempotency/deduplication.
+        """
+
+    @abstractmethod
+    def close(self) -> None:
+        """Release any resources (connections, sessions)."""
+
+
+# ---------------------------------------------------------------------------
+# IMAP APPEND backend
+# ---------------------------------------------------------------------------
+
+
+class AppendBackend(GmailDelivery):
+    """
+    Delivers messages to Gmail via IMAP ``APPEND``.
+
+    Uses a dedicated IMAP connection (one per worker for thread safety).
+    """
+
+    def __init__(
+        self,
+        config: GmailConfig,
+        retry_config: Optional[RetryConfig] = None,
+    ):
+        self._config = config
+        self._retry = retry_config or RetryConfig()
+        self._conn: Optional[imaplib.IMAP4_SSL] = None
+        self._log = logging.getLogger("gmail.append")
+
+    def _ensure_connected(self) -> imaplib.IMAP4_SSL:
+        """Return a connected, authenticated IMAP session."""
+        if self._conn is not None:
+            try:
+                self._conn.noop()
+                return self._conn
+            except Exception:
+                self._conn = None  # reconnect below
+
+        last_exc: Optional[Exception] = None
+        for attempt in range(1, self._retry.max_attempts + 1):
+            try:
+                ctx = ssl.create_default_context()
+                self._conn = imaplib.IMAP4_SSL(
+                    self._config.imap_host,
+                    self._config.imap_port,
+                    ssl_context=ctx,
+                )
+                self._conn.login(self._config.email, self._config.app_password)
+                self._log.debug(
+                    "Connected to Gmail IMAP as %s", self._config.email
+                )
+                return self._conn
+            except imaplib.IMAP4.error as exc:
+                last_exc = exc
+                msg = str(exc).lower()
+                if "authentication" in msg or "login" in msg:
+                    raise RuntimeError(
+                        f"Gmail authentication failed for {self._config.email}. "
+                        "Check your App Password."
+                    ) from exc
+            except (OSError, ssl.SSLError) as exc:
+                last_exc = exc
+
+            self._log.warning(
+                "Gmail connect attempt %d/%d failed: %s",
+                attempt,
+                self._retry.max_attempts,
+                last_exc,
+            )
+            self._conn = None
+            if attempt < self._retry.max_attempts:
+                delay = min(
+                    self._retry.base_delay * (2 ** (attempt - 1)),
+                    self._retry.max_delay,
+                )
+                time.sleep(delay)
+
+        raise RuntimeError(
+            f"Could not connect to Gmail IMAP after "
+            f"{self._retry.max_attempts} attempts"
+        ) from last_exc
+
+    def deliver(
+        self,
+        raw_rfc822: bytes,
+        internaldate: Optional[str] = None,
+        flags: Optional[tuple] = None,
+        mailbox: Optional[str] = None,
+    ) -> DeliveryResult:
+        try:
+            conn = self._ensure_connected()
+        except Exception as exc:
+            return DeliveryResult(ok=False, error=str(exc))
+
+        # Use per-account mailbox if given, else fall back to config default
+        target = mailbox or self._config.append_mailbox
+
+        # Build IMAP APPEND arguments
+        append_args = [target]
+
+        # Flags
+        if flags:
+            flag_str = " ".join(flags)
+            if not flag_str.startswith("("):
+                flag_str = f"({flag_str})"
+        else:
+            flag_str = "()"
+        append_args.append(flag_str)
+
+        # Internal date
+        if internaldate:
+            append_args.append(f'"{internaldate}"')
+
+        # Message data
+        append_args.append(raw_rfc822)
+
+        try:
+            typ, data = conn.append(*append_args)
+            if typ == "OK":
+                # Try to extract Message-ID from raw for logging
+                msg_id = _extract_message_id(raw_rfc822)
+                return DeliveryResult(ok=True, message_id=msg_id)
+            else:
+                return DeliveryResult(
+                    ok=False, error=f"APPEND failed: {typ!r} {data!r}"
+                )
+        except (imaplib.IMAP4.abort, OSError, imaplib.IMAP4.error) as exc:
+            self._conn = None  # force reconnect next time
+            return DeliveryResult(ok=False, error=str(exc))
+
+    def message_exists(self, message_id: str) -> bool:
+        """Search Gmail mailbox for a message by Message-ID header."""
+        try:
+            conn = self._ensure_connected()
+        except Exception:
+            return False  # assume not exists on connection error
+
+        try:
+            # Select the mailbox first
+            conn.select(f'"{self._config.append_mailbox}"', readonly=True)
+            criteria = f'HEADER Message-ID "{message_id}"'
+            typ, data = conn.uid("SEARCH", None, criteria)
+            if typ != "OK":
+                return False
+            for line in data:
+                if isinstance(line, bytes):
+                    line = line.decode("utf-8", errors="replace")
+                if line.startswith("* SEARCH") and len(line.split()) > 2:
+                    return True
+            return False
+        except imaplib.IMAP4.error:
+            return False
+
+    def close(self) -> None:
+        if self._conn:
+            try:
+                self._conn.logout()
+            except Exception:
+                pass
+            self._conn = None
+
+
+# ---------------------------------------------------------------------------
+# Gmail API backend (optional)
+# ---------------------------------------------------------------------------
+
+
+class ApiBackend(GmailDelivery):
+    """
+    Delivers messages via the Gmail API ``users.messages.import`` method.
+
+    Requires OAuth credentials (credentials.json + token.json).
+    Only instantiated when ``gmail.method == "api"``.
+    """
+
+    def __init__(self, config: GmailConfig):
+        self._config = config
+        self._service = None
+        self._log = logging.getLogger("gmail.api")
+
+    def _get_service(self):
+        if self._service:
+            return self._service
+
+        try:
+            from google.auth.transport.requests import Request
+            from google.oauth2.credentials import Credentials
+            from google_auth_oauthlib.flow import InstalledAppFlow
+            from googleapiclient.discovery import build
+        except ImportError as exc:
+            raise ImportError(
+                "google-api-python-client and google-auth-* are required "
+                "for Gmail API backend. pip install google-api-python-client "
+                "google-auth-httplib2 google-auth-oauthlib"
+            ) from exc
+
+        SCOPES = ["https://www.googleapis.com/auth/gmail.modify"]
+        creds = None
+
+        if self._config.api.token_file:
+            try:
+                creds = Credentials.from_authorized_user_file(
+                    self._config.api.token_file, SCOPES
+                )
+            except Exception:
+                pass
+
+        if not creds or not creds.valid:
+            if creds and creds.expired and creds.refresh_token:
+                creds.refresh(Request())
+            else:
+                flow = InstalledAppFlow.from_client_secrets_file(
+                    self._config.api.credentials_file, SCOPES
+                )
+                creds = flow.run_local_server(port=0)
+            # Save token
+            if self._config.api.token_file:
+                with open(self._config.api.token_file, "w") as fh:
+                    fh.write(creds.to_json())
+
+        self._service = build("gmail", "v1", credentials=creds)
+        return self._service
+
+    def deliver(
+        self,
+        raw_rfc822: bytes,
+        internaldate: Optional[str] = None,
+        flags: Optional[tuple] = None,
+        mailbox: Optional[str] = None,
+    ) -> DeliveryResult:
+        import base64
+
+        try:
+            service = self._get_service()
+        except Exception as exc:
+            return DeliveryResult(ok=False, error=str(exc))
+
+        try:
+            body = {
+                "raw": base64.urlsafe_b64encode(raw_rfc822).decode("ascii"),
+                "neverMarkSpam": True,
+                "internalDateSource": "dateHeader",
+            }
+            result = (
+                service.users()
+                .messages()
+                .import_(userId="me", body=body)
+                .execute()
+            )
+            msg_id = result.get("id")
+            return DeliveryResult(ok=True, message_id=msg_id)
+        except Exception as exc:
+            return DeliveryResult(ok=False, error=str(exc))
+
+    def message_exists(self, message_id: str) -> bool:
+        try:
+            service = self._get_service()
+        except Exception:
+            return False
+
+        try:
+            result = (
+                service.users()
+                .messages()
+                .list(
+                    userId="me",
+                    q=f"rfc822msgid:{message_id}",
+                    maxResults=1,
+                )
+                .execute()
+            )
+            return bool(result.get("messages"))
+        except Exception:
+            return False
+
+    def close(self) -> None:
+        self._service = None
+
+
+# ---------------------------------------------------------------------------
+# Factory
+# ---------------------------------------------------------------------------
+
+
+def build_gmail_delivery(
+    config: GmailConfig,
+    retry_config: Optional[RetryConfig] = None,
+) -> GmailDelivery:
+    """
+    Create the appropriate GmailDelivery backend based on ``config.method``.
+
+    :param config: Gmail delivery configuration
+    :param retry_config: retry settings (used by AppendBackend)
+    :return: a GmailDelivery instance
+    """
+    if config.method == "api":
+        return ApiBackend(config)
+    return AppendBackend(config, retry_config)
+
+
+# ---------------------------------------------------------------------------
+# Helpers
+# ---------------------------------------------------------------------------
+
+
+def _extract_message_id(raw_rfc822: bytes) -> Optional[str]:
+    """Extract the Message-ID header from a raw RFC822 message."""
+    try:
+        msg = email.message_from_bytes(raw_rfc822)
+        return msg.get("Message-ID")
+    except Exception:
+        return None

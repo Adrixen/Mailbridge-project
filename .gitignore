@@ -1,0 +1,9 @@
+config/config.yaml
+config/passwords.yaml
+config/credentials.json
+config/token.json
+state.json
+logs/
+__pycache__/
+*.pyc
+.env

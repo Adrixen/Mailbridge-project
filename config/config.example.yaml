@@ -1,0 +1,43 @@
+poll_interval: 120          # seconds between sync cycles
+max_concurrency: 12         # max simultaneous account workers
+connect_timeout: 30         # IMAP socket timeout (seconds)
+dry_run: false              # if true, only log actions (no real delivery/trash)
+dedupe_by_message_id: true  # skip delivery if Message-ID already in Gmail
+max_message_bytes: 52428800 # 50 MB max message size (skip larger)
+
+retry:
+  max_attempts: 5
+  base_delay: 5             # exponential backoff base (seconds)
+  max_delay: 300
+
+gmail:
+  email: moj@gmail.com
+  method: append            # "append" | "api"
+  append_mailbox: "INBOX"   # target label/mailbox for APPEND
+  imap_host: imap.gmail.com
+  imap_port: 993
+  # api settings only used when method == "api":
+  api:
+    credentials_file: credentials.json
+    token_file: token.json
+
+wp:
+  imap_host: imap.wp.pl
+  imap_port: 993
+  source_mailbox: "INBOX"
+  trash_mailbox: "Trash"      # WP.pl trash folder name (may vary per account)
+  mark_seen_after_copy: false
+  sync_all_folders: true      # if true, auto-discover all folders (except exclude_folders)
+  exclude_folders: ["Trash"]  # folders to skip when sync_all_folders is true
+  # extra_folders: []         # only used when sync_all_folders is false
+
+# Optional: set initial_import: true to import all existing mail on first run
+# initial_import: false
+
+accounts:
+  - id: konto1
+    email: konto1@wp.pl
+    append_mailbox: "WP.PL/konto1@wp.pl"   # optional: defaults to "WP.PL/<email>" if omitted
+  - id: konto2
+    email: konto2@wp.pl
+    # append_mailbox not set → defaults to "WP.PL/konto2@wp.pl"

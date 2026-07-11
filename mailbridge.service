@@ -1,0 +1,25 @@
+[Unit]
+Description=MailBridge WP->Gmail
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=notify
+User=mailbridge
+Group=mailbridge
+WorkingDirectory=/opt/mailbridge
+ExecStart=/opt/mailbridge/venv/bin/python /opt/mailbridge/bridge.py --webpanel
+Restart=always
+RestartSec=10
+WatchdogSec=120
+# Hardening
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=true
+ReadWritePaths=/opt/mailbridge
+ProtectKernelTunables=true
+ProtectControlGroups=true
+
+[Install]
+WantedBy=multi-user.target
