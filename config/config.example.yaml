@@ -37,7 +37,7 @@ wp:
 accounts:
   - id: account1
     email: account1@wp.pl
-    append_mailbox: "WP.PL/account1@wp.pl"   # optional: defaults to "WP.PL/<email>" if omitted
+    # append_mailbox not set → defaults to global gmail.append_mailbox ("INBOX")
   - id: account2
     email: account2@wp.pl
-    # append_mailbox not set → defaults to "WP.PL/account2@wp.pl"
+    append_mailbox: "WP.PL/account2@wp.pl"   # override: delivers to this label instead
