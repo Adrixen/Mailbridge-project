@@ -294,10 +294,11 @@ class AccountWorker:
 
         self._log.info("uid=%d delivered to INBOX (msgid=%s)", uid, msg_id)
 
-        # Apply label if target is not INBOX and we have a Message-ID
-        if label and msg_id and not self._app.dry_run:
+        # Apply label if target is not INBOX
+        if label and not self._app.dry_run:
             try:
-                self._gmail.add_label(msg_id, label)
+                # Use Message-ID if available, fall back to APPENDUID
+                self._gmail.add_label(msg_id, label, uid=result.uid)
                 self._log.info("uid=%d labeled as '%s'", uid, label)
             except Exception as exc:
                 self._log.warning(

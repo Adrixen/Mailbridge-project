@@ -42,6 +42,7 @@ def _parse_uid_list(response_lines) -> list[int]:
 class DeliveryResult:
     ok: bool
     message_id: Optional[str] = None
+    uid: Optional[int] = None
     error: Optional[str] = None
 
 
@@ -83,7 +84,7 @@ class GmailDelivery(ABC):
         """Release any resources (connections, sessions)."""
 
     @abstractmethod
-    def add_label(self, message_id: str, label: str) -> None:
+    def add_label(self, message_id: str, label: str, uid: Optional[int] = None) -> None:
         """Apply a Gmail label to an already-delivered message by Message-ID."""
 
 
@@ -189,7 +190,9 @@ class AppendBackend(GmailDelivery):
             if typ == "OK":
                 # Try to extract Message-ID from raw for logging
                 msg_id = _extract_message_id(raw_rfc822)
-                return DeliveryResult(ok=True, message_id=msg_id)
+                # Try to extract APPENDUID from response for labeling fallback
+                uid = _parse_appended_uid(data)
+                return DeliveryResult(ok=True, message_id=msg_id, uid=uid)
             else:
                 return DeliveryResult(
                     ok=False, error=f"APPEND failed: {typ!r} {data!r}"
@@ -231,29 +234,44 @@ class AppendBackend(GmailDelivery):
                 pass
             self._conn = None
 
-    def add_label(self, message_id: str, label: str) -> None:
+    def add_label(self, message_id: str, label: str, uid: Optional[int] = None) -> None:
         """
         Apply a Gmail label to an already-delivered message.
 
         Searches INBOX for the message by Message-ID, then copies it to
         the target label folder (which adds the label in Gmail).
+
+        If *uid* is provided (from an APPENDUID response), it's used
+        directly as a fallback when the Message-ID is missing or the
+        search fails.
         """
         conn = self._ensure_connected()
         try:
             conn.select("INBOX", readonly=False)
-            criteria = f'HEADER Message-ID "{message_id}"'
-            typ, data = conn.uid("SEARCH", None, criteria)
-            if typ != "OK":
-                raise RuntimeError(f"SEARCH failed: {typ!r}")
-            uids = _parse_uid_list(data)
-            if not uids:
+            found_uid = None
+
+            # Try to find by Message-ID first
+            if message_id:
+                criteria = f'HEADER Message-ID "{message_id}"'
+                typ, data = conn.uid("SEARCH", None, criteria)
+                if typ == "OK":
+                    uids = _parse_uid_list(data)
+                    if uids:
+                        found_uid = uids[0]
+
+            # Fallback: use the APPENDUID if provided
+            if found_uid is None and uid is not None:
+                found_uid = uid
+
+            if found_uid is None:
                 self._log.warning(
-                    "add_label: message %s not found in INBOX", message_id
+                    "add_label: could not locate message %s in INBOX",
+                    message_id or "(no Message-ID)",
                 )
                 return
-            uid = uids[0]
+
             # Let imaplib handle quoting — don't add extra quotes
-            typ, data = conn.uid("COPY", str(uid), label)
+            typ, data = conn.uid("COPY", str(found_uid), label)
             if typ != "OK":
                 raise RuntimeError(f"UID COPY to {label} failed: {typ!r}")
         except (imaplib.IMAP4.abort, OSError, imaplib.IMAP4.error) as exc:
@@ -376,7 +394,7 @@ class ApiBackend(GmailDelivery):
     def close(self) -> None:
         self._service = None
 
-    def add_label(self, message_id: str, label: str) -> None:
+    def add_label(self, message_id: str, label: str, uid: Optional[int] = None) -> None:
         """Apply a Gmail label (not implemented for API backend)."""
         pass  # API import handles labels natively
 
@@ -414,3 +432,23 @@ def _extract_message_id(raw_rfc822: bytes) -> Optional[str]:
         return msg.get("Message-ID")
     except Exception:
         return None
+
+
+def _parse_appended_uid(data) -> Optional[int]:
+    """Extract the UID from an APPEND response like [APPENDUID <val> <uid>]."""
+    if not data:
+        return None
+    for item in data:
+        if isinstance(item, bytes):
+            text = item.decode("utf-8", errors="replace")
+        else:
+            text = str(item)
+        if "APPENDUID" in text:
+            try:
+                parts = text.replace("[", "").replace("]", "").split()
+                # parts: ['APPENDUID', '<uidvalidity>', '<uid>']
+                if len(parts) >= 3:
+                    return int(parts[2])
+            except (IndexError, ValueError):
+                pass
+    return None
