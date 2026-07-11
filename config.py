@@ -161,8 +161,7 @@ def _parse_wp(raw: Dict[str, Any]) -> WpConfig:
 
 
 def _parse_accounts(
-    raw: Dict[str, Any], passwords: Dict[str, Any], wp_config: WpConfig,
-    default_append_mailbox: str = "INBOX",
+    raw: Dict[str, Any], passwords: Dict[str, Any], wp_config: WpConfig
 ) -> List[AccountConfig]:
     accounts: List[AccountConfig] = []
     pwd_accounts = passwords.get("accounts", {})
@@ -171,10 +170,10 @@ def _parse_accounts(
         email = entry["email"]
         password = pwd_accounts.get(acc_id, "")
         folders = [wp_config.source_mailbox] + wp_config.extra_folders
-        # Default to the global gmail.append_mailbox if not overridden per-account
+        # Default to "WP.PL/<email>" e.g. "WP.PL/maxerer@wp.pl"
         am = entry.get("append_mailbox", "")
         if not am:
-            am = default_append_mailbox
+            am = f"WP.PL/{email}"
         accounts.append(
             AccountConfig(
                 id=acc_id,
@@ -200,8 +199,7 @@ def load_config(
     passwords = load_passwords(passwords_path)
 
     wp = _parse_wp(raw)
-    gmail = _parse_gmail(raw, passwords)
-    accounts = _parse_accounts(raw, passwords, wp, gmail.append_mailbox)
+    accounts = _parse_accounts(raw, passwords, wp)
 
     # Build config
     config = AppConfig(
