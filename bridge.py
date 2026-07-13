@@ -112,7 +112,7 @@ def run_cycle(
             # Stagger logins to avoid overwhelming the wp.pl IMAP server
             if i > 0:
                 # Sleep in 1s chunks so we ping watchdog and can stop gracefully
-                for _ in range(30):
+                for _ in range(config.stagger_delay):
                     if _stop_event:
                         break
                     _watchdog_ping()
@@ -329,10 +329,9 @@ def main() -> int:
             if _stop_event:
                 break
 
-            # Sleep until next cycle (accounting for cycle duration)
-            elapsed = time.time() - cycle_start
-            sleep_time = max(1, config.poll_interval - elapsed)
-            log.debug("Sleeping %.1fs until next cycle", sleep_time)
+            # Fixed gap between cycles (poll_interval = cooldown after cycle ends)
+            sleep_time = config.poll_interval
+            log.debug("Sleeping %ds until next cycle", sleep_time)
 
             # Sleep in small chunks to allow responsive shutdown and watchdog pings
             while sleep_time > 0 and not _stop_event:

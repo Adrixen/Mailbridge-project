@@ -68,7 +68,8 @@ class AccountConfig:
 @dataclass
 class AppConfig:
     poll_interval: int = 120
-    max_concurrency: int = 12
+    max_concurrency: int = 3
+    stagger_delay: int = 30       # seconds between each account's start
     connect_timeout: int = 30
     dry_run: bool = False
     dedupe_by_message_id: bool = True
@@ -204,7 +205,8 @@ def load_config(
     # Build config
     config = AppConfig(
         poll_interval=int(raw.get("poll_interval", 120)),
-        max_concurrency=int(raw.get("max_concurrency", 12)),
+        max_concurrency=int(raw.get("max_concurrency", 3)),
+        stagger_delay=int(raw.get("stagger_delay", 30)),
         connect_timeout=int(raw.get("connect_timeout", 30)),
         dry_run=bool(raw.get("dry_run", False)),
         dedupe_by_message_id=bool(raw.get("dedupe_by_message_id", True)),
