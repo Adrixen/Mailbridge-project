@@ -76,6 +76,21 @@ class AccountWorker:
         Run one sync cycle. Returns stats dict with keys: copied, errors, skipped.
         """
         self._stats = {"copied": 0, "errors": 0, "skipped": 0}
+
+        # Check if account is in exponential backoff period
+        next_retry, attempt = state_mod.get_account_backoff(
+            self._state, self._account.id
+        )
+        if next_retry > time.time():
+            remaining = int(next_retry - time.time())
+            self._log.info(
+                "Skipping — in backoff for %d more seconds (attempt %d)",
+                remaining,
+                attempt,
+            )
+            self._report_status("idle")
+            return self._stats
+
         self._report_status("syncing")
 
         try:

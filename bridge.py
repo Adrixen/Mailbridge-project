@@ -212,9 +212,9 @@ def main() -> int:
         help="Reset last_uid to 0 for all accounts and re-import all messages (one run)",
     )
     parser.add_argument(
-        "--reset-stats",
+        "--reset-all-errors",
         action="store_true",
-        help="Zero out all cumulative error/copied stats",
+        help="Zero out all cumulative error counts for all accounts",
     )
     parser.add_argument(
         "--verbose", "-v",
@@ -238,12 +238,12 @@ def main() -> int:
 
     shared_state = load_state(args.state)
 
-    # --reset-stats: zero out cumulative error/copied counters
-    if args.reset_stats:
-        log.warning("--reset-stats: zeroing all cumulative stats")
+    # --reset-all-errors: zero out cumulative error counters
+    if args.reset_all_errors:
+        log.warning("--reset-all-errors: zeroing all cumulative error counts")
         reset_all_cumulative_stats(shared_state)
         save_state(args.state, shared_state)
-        log.warning("Cumulative stats reset.")
+        log.warning("All cumulative errors reset.")
 
     # --resync: reset all last_uid to 0 so all messages are re-imported
     if args.resync:
