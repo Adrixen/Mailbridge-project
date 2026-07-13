@@ -69,7 +69,7 @@ _PAGE_TEMPLATE = """<!DOCTYPE html>
   .log-section h2 {{ font-size: 1.1rem; margin-bottom: 0.5rem; }}
   #log-box {{ background: #0a0f1a; border: 1px solid #334155; border-radius: 8px;
              padding: 0.75rem; font-family: 'Courier New', monospace; font-size: 0.75rem;
-             max-height: 300px; overflow-y: auto; color: var(--muted); line-height: 1.5; }}
+             max-height: 600px; overflow-y: auto; color: var(--muted); line-height: 1.5; }}
   .log-line {{ white-space: pre-wrap; word-break: break-all; }}
   .auto-refresh {{ display: flex; align-items: center; gap: 0.5rem; font-size: 0.8rem; color: var(--muted); }}
 </style>
@@ -115,8 +115,9 @@ async function fetchLogs() {{
     const res = await fetch('/api/logs');
     const text = await res.text();
     const box = document.getElementById('log-box');
+    const wasAtBottom = box.scrollHeight - box.scrollTop - box.clientHeight < 50;
     box.innerHTML = text.split('\\n').filter(l => l.trim()).map(l => `<div class="log-line">${{l}}</div>`).join('');
-    box.scrollTop = box.scrollHeight;
+    if (wasAtBottom) box.scrollTop = box.scrollHeight;
   }} catch(e) {{}}
 }}
 startAutoRefresh();

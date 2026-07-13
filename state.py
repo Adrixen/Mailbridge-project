@@ -206,3 +206,60 @@ def set_cumulative_stats(
             "copied": copied,
             "errors": errors,
         }
+
+
+def reset_all_cumulative_stats(state: Dict[str, Any], reset_copied: bool = False) -> None:
+    """Zero out cumulative stats for all accounts. By default only resets errors."""
+    with _state_lock:
+        stats = state.get(_STATS_KEY)
+        if stats:
+            for acc_id in stats:
+                cur = stats[acc_id]
+                stats[acc_id] = {
+                    "copied": 0 if reset_copied else cur.get("copied", 0),
+                    "errors": 0,
+                }
+
+
+# ---------------------------------------------------------------------------
+# Per-account auth backoff (exponential, persisted across restarts)
+# ---------------------------------------------------------------------------
+
+_BACKOFF_KEY = "_backoff"
+
+
+def get_account_backoff(
+    state: Dict[str, Any], account_id: str
+) -> tuple[float, int]:
+    """
+    Return (next_retry_timestamp, attempt_count) for an account.
+    If no backoff is set, next_retry = 0 (can retry now).
+    """
+    with _state_lock:
+        backoffs = state.get(_BACKOFF_KEY, {})
+        entry = backoffs.get(account_id, {})
+        return entry.get("next_retry", 0.0), entry.get("attempt", 0)
+
+
+def increase_account_backoff(state: Dict[str, Any], account_id: str) -> int:
+    """
+    Increase backoff exponentially for an account.
+    Progression: 5, 10, 20, 40, 80, 160, 320 minutes (cap at 360 = 6h).
+    Returns the new backoff delay in minutes.
+    """
+    with _state_lock:
+        backoffs = state.setdefault(_BACKOFF_KEY, {})
+        entry = backoffs.setdefault(account_id, {"attempt": 0, "next_retry": 0.0})
+        attempt = entry.get("attempt", 0) + 1
+        delay_min = min(5 * (2 ** (attempt - 1)), 360)  # cap at 6 hours
+        entry["attempt"] = attempt
+        entry["next_retry"] = time.time() + delay_min * 60
+        return delay_min
+
+
+def clear_account_backoff(state: Dict[str, Any], account_id: str) -> None:
+    """Clear backoff state on successful connection."""
+    with _state_lock:
+        backoffs = state.get(_BACKOFF_KEY)
+        if backoffs and account_id in backoffs:
+            del backoffs[account_id]

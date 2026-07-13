@@ -122,10 +122,23 @@ class AccountWorker:
             self._log.error("Connection failed for %s: %s", self._account.email, exc)
             self._stats["errors"] += 1
             self._report_status("error", str(exc))
+            # Apply exponential backoff so we don't hammer wp.pl on repeat failures
+            delay_min = state_mod.increase_account_backoff(
+                self._state, self._account.id
+            )
+            self._log.warning(
+                "Backoff for %s: next retry in %d min (attempt %d)",
+                self._account.email,
+                delay_min,
+                state_mod.get_account_backoff(self._state, self._account.id)[1],
+            )
         except Exception as exc:
             self._log.exception("Unexpected error syncing %s", self._account.email)
             self._stats["errors"] += 1
             self._report_status("error", str(exc))
+
+        # Clear backoff on success
+        state_mod.clear_account_backoff(self._state, self._account.id)
 
         self._log.info(
             "Cycle done: %d copied, %d errors, %d skipped (last_uid varies per folder)",

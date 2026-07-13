@@ -27,7 +27,13 @@ from typing import Any, Dict
 from config import AppConfig, load_config
 from gmail import build_gmail_delivery
 from logger import setup_logging
-from state import load_state, save_state, get_cumulative_stats, set_cumulative_stats
+from state import (
+    load_state,
+    save_state,
+    get_cumulative_stats,
+    set_cumulative_stats,
+    reset_all_cumulative_stats,
+)
 from worker import AccountWorker, StatusRegistry
 
 
@@ -206,6 +212,11 @@ def main() -> int:
         help="Reset last_uid to 0 for all accounts and re-import all messages (one run)",
     )
     parser.add_argument(
+        "--reset-stats",
+        action="store_true",
+        help="Zero out all cumulative error/copied stats",
+    )
+    parser.add_argument(
         "--verbose", "-v",
         action="store_true",
         help="Enable DEBUG-level logging",
@@ -226,6 +237,13 @@ def main() -> int:
         return 1
 
     shared_state = load_state(args.state)
+
+    # --reset-stats: zero out cumulative error/copied counters
+    if args.reset_stats:
+        log.warning("--reset-stats: zeroing all cumulative stats")
+        reset_all_cumulative_stats(shared_state)
+        save_state(args.state, shared_state)
+        log.warning("Cumulative stats reset.")
 
     # --resync: reset all last_uid to 0 so all messages are re-imported
     if args.resync:
