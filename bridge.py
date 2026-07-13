@@ -32,10 +32,14 @@ from worker import AccountWorker, StatusRegistry
 
 
 # ---------------------------------------------------------------------------
-# Global stop event for graceful shutdown
+# Global state
 # ---------------------------------------------------------------------------
 
 _stop_event = False
+_watchdog_enabled = False
+_notify_socket: str | None = None
+_last_watchdog: float = 0.0
+_watchdog_interval: float = 0.0
 
 
 def _handle_signal(signum, frame):
@@ -43,6 +47,31 @@ def _handle_signal(signum, frame):
     log = logging.getLogger("bridge")
     log.info("Received signal %s, initiating graceful shutdown...", signum)
     _stop_event = True
+
+
+def _sd_notify(state_bytes: bytes) -> None:
+    """Send a notification to systemd via the notify socket."""
+    ns = _notify_socket
+    if not ns:
+        return
+    import socket
+
+    sock = socket.socket(socket.AF_UNIX, socket.SOCK_DGRAM)
+    try:
+        sock.sendto(state_bytes, ns)
+    finally:
+        sock.close()
+
+
+def _watchdog_ping() -> None:
+    """Send WATCHDOG=1 if interval has elapsed. Safe to call anywhere."""
+    global _last_watchdog
+    if not _watchdog_enabled:
+        return
+    now = time.time()
+    if now - _last_watchdog >= _watchdog_interval:
+        _sd_notify(b"WATCHDOG=1")
+        _last_watchdog = now
 
 
 # ---------------------------------------------------------------------------
@@ -76,7 +105,14 @@ def run_cycle(
                 break
             # Stagger logins to avoid overwhelming the wp.pl IMAP server
             if i > 0:
-                time.sleep(30)
+                # Sleep in 1s chunks so we ping watchdog and can stop gracefully
+                for _ in range(30):
+                    if _stop_event:
+                        break
+                    _watchdog_ping()
+                    time.sleep(1)
+                if _stop_event:
+                    break
 
             # Each worker gets its own Gmail delivery backend
             try:
@@ -230,29 +266,17 @@ def main() -> int:
     log.info("MailBridge starting (poll_interval=%ds)", config.poll_interval)
 
     # --- Optional: systemd watchdog integration ---
-    watchdog_enabled = False
-    watchdog_usec = 0
-    notify_socket = os.environ.get("NOTIFY_SOCKET")
-    if notify_socket:
+    global _watchdog_enabled, _notify_socket, _last_watchdog, _watchdog_interval
+    _notify_socket = os.environ.get("NOTIFY_SOCKET")
+    if _notify_socket:
         try:
-            import socket
-
-            def _sd_notify(state_bytes: bytes) -> None:
-                if not notify_socket:
-                    return
-                sock = socket.socket(socket.AF_UNIX, socket.SOCK_DGRAM)
-                try:
-                    sock.sendto(state_bytes, notify_socket)
-                finally:
-                    sock.close()
-
             _sd_notify(b"READY=1")
             watchdog_usec_raw = os.environ.get("WATCHDOG_USEC")
             if watchdog_usec_raw:
                 watchdog_usec = int(watchdog_usec_raw)
-                watchdog_enabled = True
-                # Notify at half the watchdog interval
-                watchdog_interval = watchdog_usec / 2_000_000
+                _watchdog_enabled = True
+                _watchdog_interval = watchdog_usec / 2_000_000
+                _last_watchdog = time.time()
                 log.info(
                     "systemd watchdog enabled (interval=%d µs)", watchdog_usec
                 )
@@ -276,7 +300,7 @@ def main() -> int:
             log.warning("Failed to start web dashboard: %s", exc)
 
     # --- Main loop ---
-    last_watchdog = time.time()
+    _last_watchdog = time.time()
     try:
         while not _stop_event:
             cycle_start = time.time()
@@ -287,23 +311,14 @@ def main() -> int:
             if _stop_event:
                 break
 
-            # systemd watchdog ping
-            if watchdog_enabled:
-                now = time.time()
-                if now - last_watchdog > watchdog_interval:
-                    try:
-                        _sd_notify(b"WATCHDOG=1")
-                        last_watchdog = now
-                    except Exception:
-                        pass
-
             # Sleep until next cycle (accounting for cycle duration)
             elapsed = time.time() - cycle_start
             sleep_time = max(1, config.poll_interval - elapsed)
             log.debug("Sleeping %.1fs until next cycle", sleep_time)
 
-            # Sleep in small chunks to allow responsive shutdown
+            # Sleep in small chunks to allow responsive shutdown and watchdog pings
             while sleep_time > 0 and not _stop_event:
+                _watchdog_ping()
                 chunk = min(1, sleep_time)
                 time.sleep(chunk)
                 sleep_time -= chunk
