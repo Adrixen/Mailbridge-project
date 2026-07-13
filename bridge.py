@@ -71,9 +71,13 @@ def run_cycle(
 
     with ThreadPoolExecutor(max_workers=config.max_concurrency) as executor:
         futures = {}
-        for account in config.accounts:
+        for i, account in enumerate(config.accounts):
             if _stop_event:
                 break
+            # Stagger logins to avoid overwhelming the wp.pl IMAP server
+            if i > 0:
+                time.sleep(5)
+
             # Each worker gets its own Gmail delivery backend
             try:
                 gmail = build_gmail_delivery(config.gmail, config.retry)

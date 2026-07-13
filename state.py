@@ -12,6 +12,7 @@ import json
 import os
 import tempfile
 import threading
+import time
 from typing import Any, Dict, Optional
 
 # ---------------------------------------------------------------------------
@@ -25,8 +26,36 @@ _state_lock = threading.Lock()
 # I/O
 # ---------------------------------------------------------------------------
 
+def cleanup_stale_tmp_files(state_path: str, max_age: float = 300) -> int:
+    """
+    Remove stale tmp*.json files left from previous crashes.
+
+    Only removes files older than *max_age* seconds (default 5 min).
+    Returns the number of removed files.
+    """
+    dirname = os.path.dirname(state_path) or "."
+    now = time.time()
+    removed = 0
+    try:
+        for f in os.listdir(dirname):
+            if f.startswith("tmp") and f.endswith(".json"):
+                fpath = os.path.join(dirname, f)
+                try:
+                    age = now - os.path.getmtime(fpath)
+                    if age >= max_age:
+                        os.unlink(fpath)
+                        removed += 1
+                except OSError:
+                    pass
+    except OSError:
+        pass
+    return removed
+
+
 def load_state(path: str) -> Dict[str, Any]:
     """Load state from JSON file. Returns empty dict if missing or corrupt."""
+    # Clean up stale tmp files on startup
+    cleanup_stale_tmp_files(path)
     if not os.path.exists(path):
         return {}
     try:
@@ -47,11 +76,14 @@ def save_state(path: str, state: Dict[str, Any]) -> None:
     Atomically write *state* to *path*.
 
     The state dict is assumed to be a reference shared across workers; copy
-    under the lock to get a consistent snapshot.
+    under the lock to get a consistent snapshot.  Stale tmp files from previous
+    crashes are cleaned up before each write.
     """
     with _state_lock:
         snapshot = json.loads(json.dumps(state))  # deep-copy
         dirname = os.path.dirname(path) or "."
+        # Remove any leftover tmp files before creating a new one
+        cleanup_stale_tmp_files(path)
         fd, tmp_path = tempfile.mkstemp(dir=dirname, suffix=".json")
         try:
             with os.fdopen(fd, "w", encoding="utf-8") as fh:

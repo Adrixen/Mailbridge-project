@@ -426,7 +426,9 @@ class StatusRegistry:
             entry["last_sync"] = time.time()
             if last_error:
                 entry["last_error"] = last_error
-            if stats:
+
+            # Only update totals and run_history when the cycle fully completes
+            if status == "idle" and stats:
                 entry["total_copied"] = entry.get("total_copied", 0) + stats.get(
                     "copied", 0
                 )
