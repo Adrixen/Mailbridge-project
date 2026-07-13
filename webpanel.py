@@ -112,7 +112,7 @@ function stopAutoRefresh() {{
 }}
 async function fetchLogs() {{
   try {{
-    const res = await fetch('/api/logs?lines=50');
+    const res = await fetch('/api/logs');
     const text = await res.text();
     const box = document.getElementById('log-box');
     box.innerHTML = text.split('\\n').filter(l => l.trim()).map(l => `<div class="log-line">${{l}}</div>`).join('');
@@ -233,21 +233,15 @@ class StatusHandler(BaseHTTPRequestHandler):
         self.wfile.write(body)
 
     def _serve_logs(self):
-        """Return the last N lines of the mailbridge log file."""
-        import mimetypes
-        from urllib.parse import urlparse, parse_qs
-
-        qs = parse_qs(urlparse(self.path).query)
-        lines_count = int(qs.get("lines", [50])[0])
+        """Return the full mailbridge log file."""
         log_path = os.path.join(os.path.dirname(__file__), "logs", "mailbridge.log")
         try:
             with open(log_path, "r", encoding="utf-8", errors="replace") as fh:
-                all_lines = fh.readlines()
-            tail = "".join(all_lines[-lines_count:])
+                content = fh.read()
         except (FileNotFoundError, OSError):
-            tail = "Log file not found."
+            content = "Log file not found."
 
-        body = tail.encode("utf-8")
+        body = content.encode("utf-8")
         self.send_response(200)
         self.send_header("Content-Type", "text/plain; charset=utf-8")
         self.send_header("Content-Length", str(len(body)))

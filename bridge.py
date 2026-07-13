@@ -76,7 +76,7 @@ def run_cycle(
                 break
             # Stagger logins to avoid overwhelming the wp.pl IMAP server
             if i > 0:
-                time.sleep(5)
+                time.sleep(30)
 
             # Each worker gets its own Gmail delivery backend
             try:
@@ -165,6 +165,11 @@ def main() -> int:
         help="Web dashboard port (default: 8080)",
     )
     parser.add_argument(
+        "--resync",
+        action="store_true",
+        help="Reset last_uid to 0 for all accounts and re-import all messages (one run)",
+    )
+    parser.add_argument(
         "--verbose", "-v",
         action="store_true",
         help="Enable DEBUG-level logging",
@@ -185,6 +190,20 @@ def main() -> int:
         return 1
 
     shared_state = load_state(args.state)
+
+    # --resync: reset all last_uid to 0 so all messages are re-imported
+    if args.resync:
+        log.warning("--resync enabled: resetting last_uid to 0 for all accounts")
+        for acc_id, acc_data in shared_state.items():
+            if acc_id.startswith("_"):
+                continue  # skip internal keys like _stats
+            if isinstance(acc_data, dict):
+                for folder, folder_data in acc_data.items():
+                    if isinstance(folder_data, dict) and "last_uid" in folder_data:
+                        folder_data["last_uid"] = 0
+        save_state(args.state, shared_state)
+        log.warning("State reset complete. Running one sync cycle to re-import all messages.")
+
     cumulative = get_cumulative_stats(shared_state)
     status_registry = StatusRegistry(cumulative_stats=cumulative)
 
