@@ -33,6 +33,8 @@ def cleanup_stale_tmp_files(state_path: str, max_age: float = 0) -> int:
     Only removes files older than *max_age* seconds (default 0 = all).
     Returns the number of removed files.
     """
+    import logging
+
     dirname = os.path.dirname(state_path) or "."
     now = time.time()
     removed = 0
@@ -45,10 +47,16 @@ def cleanup_stale_tmp_files(state_path: str, max_age: float = 0) -> int:
                     if age >= max_age:
                         os.unlink(fpath)
                         removed += 1
-                except OSError:
-                    pass
-    except OSError:
-        pass
+                except OSError as exc:
+                    logging.getLogger("state").warning(
+                        "Could not remove stale tmp file %s: %s", fpath, exc
+                    )
+    except OSError as exc:
+        logging.getLogger("state").warning(
+            "Could not list directory %s for tmp cleanup: %s", dirname, exc
+        )
+    if removed:
+        logging.getLogger("state").info("Cleaned up %d stale tmp file(s)", removed)
     return removed
 
 
