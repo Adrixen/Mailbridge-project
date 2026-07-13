@@ -238,12 +238,13 @@ def main() -> int:
 
     shared_state = load_state(args.state)
 
-    # --reset-all-errors: zero out cumulative error counters
+    # --reset-all-errors: zero out cumulative error counters and exit
     if args.reset_all_errors:
         log.warning("--reset-all-errors: zeroing all cumulative error counts")
         reset_all_cumulative_stats(shared_state)
         save_state(args.state, shared_state)
-        log.warning("All cumulative errors reset.")
+        log.warning("All cumulative errors reset. Exiting.")
+        return 0
 
     # --resync: reset all last_uid to 0 so all messages are re-imported
     if args.resync:
