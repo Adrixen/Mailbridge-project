@@ -200,6 +200,10 @@ def main() -> int:
             if isinstance(acc_data, dict):
                 for folder, folder_data in acc_data.items():
                     if isinstance(folder_data, dict) and "last_uid" in folder_data:
+                        # Skip Spam — we don't want to re-import thousands of spam messages
+                        if folder.upper() == "SPAM":
+                            log.info("  Skipping %s/%s (Spam)", acc_id, folder)
+                            continue
                         folder_data["last_uid"] = 0
         save_state(args.state, shared_state)
         log.warning("State reset complete. Running one sync cycle to re-import all messages.")
