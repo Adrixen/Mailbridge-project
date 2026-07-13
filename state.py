@@ -26,11 +26,11 @@ _state_lock = threading.Lock()
 # I/O
 # ---------------------------------------------------------------------------
 
-def cleanup_stale_tmp_files(state_path: str, max_age: float = 300) -> int:
+def cleanup_stale_tmp_files(state_path: str, max_age: float = 0) -> int:
     """
     Remove stale tmp*.json files left from previous crashes.
 
-    Only removes files older than *max_age* seconds (default 5 min).
+    Only removes files older than *max_age* seconds (default 0 = all).
     Returns the number of removed files.
     """
     dirname = os.path.dirname(state_path) or "."
