@@ -38,6 +38,9 @@ class GmailConfig:
     email: str = ""
     method: str = "append"       # "append" | "api"
     append_mailbox: str = "INBOX"
+    spam_senders: List[str] = field(default_factory=list)
+    spam_subject_keywords: List[str] = field(default_factory=list)
+    spam_body_keywords: List[str] = field(default_factory=list)
     imap_host: str = "imap.gmail.com"
     imap_port: int = 993
     api: GmailApiConfig = field(default_factory=GmailApiConfig)
@@ -133,10 +136,23 @@ def _parse_retry(raw: Optional[Dict[str, Any]]) -> RetryConfig:
 def _parse_gmail(raw: Dict[str, Any], passwords: Dict[str, Any]) -> GmailConfig:
     gmail_raw = raw.get("gmail", {})
     api_raw = gmail_raw.get("api", {})
+
+    def _normalize_rules(values: Any) -> List[str]:
+        return [
+            str(value).strip()
+            for value in (values or [])
+            if str(value).strip()
+        ]
+
     return GmailConfig(
         email=gmail_raw.get("email", ""),
         method=gmail_raw.get("method", "append"),
         append_mailbox=gmail_raw.get("append_mailbox", "INBOX"),
+        spam_senders=_normalize_rules(gmail_raw.get("spam_senders", [])),
+        spam_subject_keywords=_normalize_rules(
+            gmail_raw.get("spam_subject_keywords", [])
+        ),
+        spam_body_keywords=_normalize_rules(gmail_raw.get("spam_body_keywords", [])),
         imap_host=gmail_raw.get("imap_host", "imap.gmail.com"),
         imap_port=int(gmail_raw.get("imap_port", 993)),
         api=GmailApiConfig(

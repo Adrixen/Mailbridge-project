@@ -14,6 +14,23 @@ gmail:
   email: moj@gmail.com
   method: append            # "append" | "api"
   append_mailbox: "INBOX"   # target label/mailbox for APPEND
+  # Messages imported from these senders are force-moved to Gmail Spam.
+  # Rules support full address (bad@x.com), @domain, or bare domain.
+  spam_senders: []
+  # spam_senders:
+  #   - "bad.sender@example.com"
+  #   - "@annoying-domain.com"
+  #   - "spamdomain.net"
+  # Subject keyword filter (case-insensitive substring match)
+  spam_subject_keywords: []
+  # spam_subject_keywords:
+  #   - "make money"
+  #   - "free gift"
+  # Body keyword filter (case-insensitive substring match)
+  spam_body_keywords: []
+  # spam_body_keywords:
+  #   - "limited time offer"
+  #   - "crypto investment"
   imap_host: imap.gmail.com
   imap_port: 993
   # api settings only used when method == "api":

@@ -87,6 +87,15 @@ class GmailDelivery(ABC):
     def add_label(self, message_id: str, label: str, uid: Optional[int] = None) -> None:
         """Apply a Gmail label to an already-delivered message by Message-ID."""
 
+    @abstractmethod
+    def move_to_spam(
+        self,
+        message_id: Optional[str],
+        delivered_message_id: Optional[str] = None,
+        uid: Optional[int] = None,
+    ) -> None:
+        """Move a delivered message to Gmail Spam."""
+
 
 # ---------------------------------------------------------------------------
 # IMAP APPEND backend
@@ -248,20 +257,7 @@ class AppendBackend(GmailDelivery):
         conn = self._ensure_connected()
         try:
             conn.select("INBOX", readonly=False)
-            found_uid = None
-
-            # Try to find by Message-ID first
-            if message_id:
-                criteria = f'HEADER Message-ID "{message_id}"'
-                typ, data = conn.uid("SEARCH", None, criteria)
-                if typ == "OK":
-                    uids = _parse_uid_list(data)
-                    if uids:
-                        found_uid = uids[0]
-
-            # Fallback: use the APPENDUID if provided
-            if found_uid is None and uid is not None:
-                found_uid = uid
+            found_uid = self._find_inbox_uid(conn, message_id, uid)
 
             if found_uid is None:
                 self._log.warning(
@@ -276,6 +272,57 @@ class AppendBackend(GmailDelivery):
                 raise RuntimeError(f"UID COPY to {label} failed: {typ!r}")
         except (imaplib.IMAP4.abort, OSError, imaplib.IMAP4.error) as exc:
             raise RuntimeError(f"add_label failed: {exc}") from exc
+
+    def move_to_spam(
+        self,
+        message_id: Optional[str],
+        delivered_message_id: Optional[str] = None,
+        uid: Optional[int] = None,
+    ) -> None:
+        """Move a delivered message from INBOX to Gmail Spam."""
+        conn = self._ensure_connected()
+        try:
+            conn.select("INBOX", readonly=False)
+            found_uid = self._find_inbox_uid(conn, message_id, uid)
+            if found_uid is None:
+                self._log.warning(
+                    "move_to_spam: could not locate message %s in INBOX",
+                    message_id or "(no Message-ID)",
+                )
+                return
+
+            typ, _ = conn.uid("COPY", str(found_uid), "[Gmail]/Spam")
+            if typ != "OK":
+                raise RuntimeError(f"UID COPY to [Gmail]/Spam failed: {typ!r}")
+
+            typ, _ = conn.uid("STORE", str(found_uid), "+FLAGS", "(\\Deleted)")
+            if typ != "OK":
+                raise RuntimeError(f"UID STORE \\Deleted failed: {typ!r}")
+
+            conn.expunge()
+        except (imaplib.IMAP4.abort, OSError, imaplib.IMAP4.error) as exc:
+            raise RuntimeError(f"move_to_spam failed: {exc}") from exc
+
+    def _find_inbox_uid(
+        self,
+        conn: imaplib.IMAP4_SSL,
+        message_id: Optional[str],
+        uid: Optional[int],
+    ) -> Optional[int]:
+        found_uid: Optional[int] = None
+
+        if message_id:
+            criteria = f'HEADER Message-ID "{message_id}"'
+            typ, data = conn.uid("SEARCH", None, criteria)
+            if typ == "OK":
+                uids = _parse_uid_list(data)
+                if uids:
+                    found_uid = uids[0]
+
+        if found_uid is None and uid is not None:
+            found_uid = uid
+
+        return found_uid
 
 
 # ---------------------------------------------------------------------------
@@ -397,6 +444,52 @@ class ApiBackend(GmailDelivery):
     def add_label(self, message_id: str, label: str, uid: Optional[int] = None) -> None:
         """Apply a Gmail label (not implemented for API backend)."""
         pass  # API import handles labels natively
+
+    def move_to_spam(
+        self,
+        message_id: Optional[str],
+        delivered_message_id: Optional[str] = None,
+        uid: Optional[int] = None,
+    ) -> None:
+        """Move a delivered Gmail API message to Spam by message id."""
+        service = self._get_service()
+        target_message_id = delivered_message_id
+
+        if not target_message_id and message_id:
+            result = (
+                service.users()
+                .messages()
+                .list(
+                    userId="me",
+                    q=f"rfc822msgid:{message_id}",
+                    maxResults=1,
+                )
+                .execute()
+            )
+            messages = result.get("messages") or []
+            if messages:
+                target_message_id = messages[0].get("id")
+
+        if not target_message_id:
+            self._log.warning(
+                "move_to_spam: could not locate Gmail message id for %s",
+                message_id or "(no Message-ID)",
+            )
+            return
+
+        (
+            service.users()
+            .messages()
+            .modify(
+                userId="me",
+                id=target_message_id,
+                body={
+                    "addLabelIds": ["SPAM"],
+                    "removeLabelIds": ["INBOX"],
+                },
+            )
+            .execute()
+        )
 
 
 # ---------------------------------------------------------------------------

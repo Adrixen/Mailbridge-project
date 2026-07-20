@@ -19,6 +19,8 @@ but not executed.
 from __future__ import annotations
 
 import email
+from email.header import decode_header
+from email.utils import parseaddr
 import logging
 import time
 from typing import Any, Dict, List, Optional
@@ -283,7 +285,35 @@ class AccountWorker:
 
         # Extract Message-ID for dedupe / logging
         msg_id = _extract_message_id(raw)
-        self._log.debug("uid=%d msgid=%s size=%d", uid, msg_id, len(raw))
+        msg_id_for_ops = msg_id or ""
+        sender = _extract_sender_address(raw)
+        subject = _extract_subject(raw)
+        body = _extract_body_text(raw)
+
+        sender_match = _sender_matches_spam_blocklist(
+            sender,
+            self._app.gmail.spam_senders,
+        )
+        subject_match = _text_matches_keyword_blocklist(
+            subject,
+            self._app.gmail.spam_subject_keywords,
+        )
+        body_match = _text_matches_keyword_blocklist(
+            body,
+            self._app.gmail.spam_body_keywords,
+        )
+        force_spam = sender_match or subject_match or body_match
+        self._log.debug(
+            "uid=%d msgid=%s sender=%s force_spam=%s (sender=%s subject=%s body=%s) size=%d",
+            uid,
+            msg_id,
+            sender,
+            force_spam,
+            sender_match,
+            subject_match,
+            body_match,
+            len(raw),
+        )
 
         # Dedupe check (optional, config-gated)
         if self._app.dedupe_by_message_id and msg_id:
@@ -322,11 +352,39 @@ class AccountWorker:
 
         self._log.info("uid=%d delivered to INBOX (msgid=%s)", uid, msg_id)
 
+        # Force-move blocked senders to Gmail Spam
+        if force_spam:
+            if self._app.dry_run:
+                self._log.info(
+                    "[DRY-RUN] uid=%d: would move sender '%s' to Gmail Spam",
+                    uid,
+                    sender or "(unknown)",
+                )
+            else:
+                try:
+                    self._gmail.move_to_spam(
+                        msg_id,
+                        delivered_message_id=result.message_id,
+                        uid=result.uid,
+                    )
+                    self._log.info(
+                        "uid=%d sender '%s' moved to Gmail Spam",
+                        uid,
+                        sender or "(unknown)",
+                    )
+                except Exception as exc:
+                    self._log.warning(
+                        "uid=%d: failed to move blocked sender '%s' to Spam: %s",
+                        uid,
+                        sender or "(unknown)",
+                        exc,
+                    )
+
         # Apply label if target is not INBOX
-        if label and not self._app.dry_run:
+        if label and not self._app.dry_run and not force_spam:
             try:
                 # Use Message-ID if available, fall back to APPENDUID
-                self._gmail.add_label(msg_id, label, uid=result.uid)
+                self._gmail.add_label(msg_id_for_ops, label, uid=result.uid)
                 self._log.info("uid=%d labeled as '%s'", uid, label)
             except Exception as exc:
                 self._log.warning(
@@ -477,6 +535,124 @@ class StatusRegistry:
         """Return a copy of the current status for all accounts."""
         with self._lock:
             return dict(self._accounts)
+
+
+def _extract_sender_address(raw_rfc822: bytes) -> Optional[str]:
+    """Return normalized sender email from From header, if available."""
+    try:
+        msg = email.message_from_bytes(raw_rfc822)
+        sender_raw = msg.get("From", "")
+        _, sender_email = parseaddr(sender_raw)
+        sender_email = (sender_email or "").strip().lower()
+        return sender_email or None
+    except Exception:
+        return None
+
+
+def _extract_subject(raw_rfc822: bytes) -> str:
+    """Decode and return Subject header as plain text."""
+    try:
+        msg = email.message_from_bytes(raw_rfc822)
+        subject_raw = msg.get("Subject", "")
+        parts = decode_header(subject_raw)
+        decoded: List[str] = []
+        for value, encoding in parts:
+            if isinstance(value, bytes):
+                charset = encoding or "utf-8"
+                decoded.append(value.decode(charset, errors="replace"))
+            else:
+                decoded.append(str(value))
+        return "".join(decoded).strip()
+    except Exception:
+        return ""
+
+
+def _extract_body_text(raw_rfc822: bytes) -> str:
+    """Extract searchable text content from text/plain and text/html parts."""
+    try:
+        msg = email.message_from_bytes(raw_rfc822)
+        chunks: List[str] = []
+
+        if msg.is_multipart():
+            for part in msg.walk():
+                if part.get_content_maintype() == "multipart":
+                    continue
+                if part.get("Content-Disposition", "").lower().startswith("attachment"):
+                    continue
+
+                content_type = part.get_content_type()
+                if content_type not in ("text/plain", "text/html"):
+                    continue
+
+                payload = part.get_payload(decode=True)
+                if payload is None:
+                    continue
+                charset = part.get_content_charset() or "utf-8"
+                if isinstance(payload, bytes):
+                    chunks.append(payload.decode(charset, errors="replace"))
+                elif isinstance(payload, str):
+                    chunks.append(payload)
+        else:
+            payload = msg.get_payload(decode=True)
+            if isinstance(payload, bytes):
+                charset = msg.get_content_charset() or "utf-8"
+                chunks.append(payload.decode(charset, errors="replace"))
+            elif isinstance(payload, str):
+                chunks.append(payload)
+
+        return "\n".join(chunks)
+    except Exception:
+        return ""
+
+
+def _sender_matches_spam_blocklist(
+    sender_email: Optional[str],
+    rules: List[str],
+) -> bool:
+    """
+    Match sender against blocklist rules.
+
+    Supported rule formats:
+      - full address: bad@example.com
+      - domain with @: @example.com
+      - bare domain: example.com
+    """
+    if not sender_email:
+        return False
+
+    sender = sender_email.strip().lower()
+    for entry in rules:
+        rule = (entry or "").strip().lower()
+        if not rule:
+            continue
+
+        if "@" in rule and not rule.startswith("@"):
+            if sender == rule:
+                return True
+            continue
+
+        if rule.startswith("@"):
+            if sender.endswith(rule):
+                return True
+            continue
+
+        if sender.endswith(f"@{rule}"):
+            return True
+
+    return False
+
+
+def _text_matches_keyword_blocklist(text: str, keywords: List[str]) -> bool:
+    """Case-insensitive substring matching for keyword blocklists."""
+    if not text:
+        return False
+
+    haystack = text.lower()
+    for entry in keywords:
+        keyword = (entry or "").strip().lower()
+        if keyword and keyword in haystack:
+            return True
+    return False
 
 
 

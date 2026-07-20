@@ -143,9 +143,44 @@ sudo systemctl restart mailbridge
 | `max_message_bytes` | `52428800` | 50 MB max message size |
 | `initial_import` | `false` | Import all existing mail on first run |
 | `gmail.method` | `append` | `append` (App Password) or `api` (OAuth) |
+| `gmail.spam_senders` | `[]` | Force-move imported messages from listed senders to Gmail Spam |
+| `gmail.spam_subject_keywords` | `[]` | Force-move imported messages to Gmail Spam if subject contains any keyword |
+| `gmail.spam_body_keywords` | `[]` | Force-move imported messages to Gmail Spam if body contains any keyword |
 | `wp.trash_mailbox` | `Trash` | WP trash folder name |
 | `wp.mark_seen_after_copy` | `false` | Mark messages \\Seen after copy |
 | `wp.extra_folders` | `[]` | Additional folders to sync (e.g. `["Sent"]`) |
+
+### Sender blocklist to Gmail Spam
+
+If Gmail account-level filters/blocks do not affect imported messages, use
+`gmail.spam_senders` in `config/config.yaml`.
+
+Supported rule formats:
+
+- full address: `bad.sender@example.com`
+- domain with @: `@annoying-domain.com`
+- bare domain: `spamdomain.net`
+
+Keyword filters:
+
+- `gmail.spam_subject_keywords`: case-insensitive substring match against Subject
+- `gmail.spam_body_keywords`: case-insensitive substring match against decoded text/plain and text/html body parts
+
+Example:
+
+```yaml
+gmail:
+  spam_senders:
+    - "bad.sender@example.com"
+    - "@annoying-domain.com"
+    - "spamdomain.net"
+  spam_subject_keywords:
+    - "make money"
+    - "free gift"
+  spam_body_keywords:
+    - "limited time offer"
+    - "crypto investment"
+```
 
 ### `config/passwords.yaml` (chmod 600)
 
